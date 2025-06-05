@@ -8,13 +8,13 @@ This guide covers development setup, testing, and contribution guidelines for th
 
 - Python 3.6 or higher
 - Git
-- Virtual environment tool (venv, virtualenv, or conda)
+- Virtual environment tool (uv, venv, virtualenv, or conda)
 
 ### Setting Up Development Environment
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/yourusername/certbot-dns-csc.git
+   git clone https://github.com/EnginEken/certbot-dns-csc.git
    cd certbot-dns-csc
    ```
 
@@ -41,12 +41,13 @@ This guide covers development setup, testing, and contribution guidelines for th
 certbot-dns-csc/
 ├── certbot_dns_csc/          # Main package
 │   ├── __init__.py           # Package documentation and exports
+│   ├── csc_client.py         # CSC API Client class implementation
 │   └── dns_csc.py           # Main plugin implementation
 ├── tests/                   # Test suite
 │   ├── __init__.py
 │   └── test_dns_csc.py     # Unit tests
-├── .github/workflows/       # CI/CD configuration
 ├── setup.py                # Package configuration
+├── csc.ini.example         # Example credentials file
 ├── requirements.txt        # Runtime dependencies
 ├── pytest.ini            # Test configuration
 ├── tox.ini               # Multi-version testing
