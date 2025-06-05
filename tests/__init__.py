@@ -1,0 +1,1 @@
+"""Tests for certbot-dns-csc plugin."""

@@ -1,0 +1,11 @@
+include README.md
+include LICENSE
+include requirements.txt
+include csc.ini.example
+include pytest.ini
+recursive-include tests *.py
+recursive-include certbot_dns_csc *.py
+global-exclude *.pyc
+global-exclude __pycache__
+global-exclude .pytest_cache
+global-exclude *.egg-info

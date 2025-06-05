@@ -1,0 +1,16 @@
+# CSC Global Domain Manager API credentials used by Certbot
+# Copy this file to /etc/letsencrypt/csc.ini and update with your actual credentials
+
+# Required: Your CSC API key
+dns_csc_api_key = your_api_key_here
+
+# Required: Your CSC Bearer token
+dns_csc_bearer_token = your_bearer_token_here
+
+# Optional: Custom API base URL (defaults to https://apis.cscglobal.com/dbs/api/v2)
+# dns_csc_base_url = https://apis.cscglobal.com/dbs/api/v2
+
+# Security Notes:
+# - Set restrictive permissions: chmod 600 /etc/letsencrypt/csc.ini
+# - Never commit this file with real credentials to version control
+# - Store in a secure location accessible only to certbot
