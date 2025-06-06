@@ -1,5 +1,7 @@
 import logging
-from typing import Any, Dict, List, Optional
+import random
+import time
+from typing import Any, Callable, Dict, List, Optional
 
 import requests
 from certbot import errors
@@ -27,6 +29,69 @@ class CSCClient:
         )
         self._zones_cache: Optional[List[Dict[str, Any]]] = None
 
+    def _retry_on_zone_edits(
+        self, operation: Callable, max_retries: int = 10, initial_wait: int = 30
+    ) -> Any:
+        """
+        Retry an operation if CSC returns OPEN_ZONE_EDITS error.
+
+        :param operation: Function to retry
+        :param max_retries: Maximum number of retry attempts
+        :param initial_wait: Initial wait time in seconds
+        :return: Result of successful operation
+        :raises: Last exception if all retries fail
+        """
+        wait_time = initial_wait
+        last_exception = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                return operation()
+
+            except requests.exceptions.RequestException as e:
+                last_exception = e
+
+                # Check if it's an OPEN_ZONE_EDITS error
+                if hasattr(e, "response") and e.response is not None:
+                    try:
+                        error_data = e.response.json()
+                        if error_data.get("code") == "OPEN_ZONE_EDITS":
+                            if attempt < max_retries:
+                                # Add some jitter to prevent thundering herd
+                                jitter = random.uniform(0.8, 1.2)
+                                actual_wait = int(wait_time * jitter)
+
+                                logger.info(
+                                    f"Zone edit in progress (attempt {attempt + 1}/{max_retries + 1}). "
+                                    f"Waiting {actual_wait} seconds before retry. "
+                                    f"Edit UUID: {error_data.get('value', 'unknown')}"
+                                )
+
+                                time.sleep(actual_wait)
+
+                                # Exponential backoff with cap, so wait_time will be
+                                wait_time = min(
+                                    wait_time * 1.5, 300
+                                )  # Cap at 5 minutes
+                                continue
+                            else:
+                                logger.error(
+                                    f"Max retries ({max_retries}) exceeded for zone edit conflict. "
+                                    f"Edit UUID: {error_data.get('value', 'unknown')}"
+                                )
+                        else:
+                            # Different error, don't retry
+                            break
+                    except (ValueError, KeyError):
+                        # Not a JSON response or missing expected fields
+                        break
+                else:
+                    # No response or different type of error
+                    break
+
+        # All retries failed, raise the last exception
+        raise last_exception  # type: ignore
+
     def add_txt_record(self, domain: str, name: str, value: str, ttl: int) -> None:
         """
         Add a TXT record using the CSC API.
@@ -37,37 +102,43 @@ class CSCClient:
         :param int ttl: The record TTL.
         :raises certbot.errors.PluginError: if an error occurs communicating with the CSC API
         """
-        zone_name = self._find_zone_for_domain(domain)
-        if not zone_name:
-            raise errors.PluginError(f"Unable to determine zone for domain {domain}")
 
-        # Extract the record key (remove zone from the full name)
-        record_key = (
-            name.replace(f".{zone_name}", "")
-            if name.endswith(f".{zone_name}")
-            else name
-        )
+        def _add_operation():
+            zone_name = self._find_zone_for_domain(domain)
+            if not zone_name:
+                raise errors.PluginError(
+                    f"Unable to determine zone for domain {domain}"
+                )
 
-        data = {
-            "zoneName": zone_name,
-            "edits": [
-                {
-                    "recordType": "TXT",
-                    "action": "ADD",
-                    "newKey": record_key,
-                    "newValue": value,
-                    "newTtl": ttl,
-                    "comments": f"ACME challenge for {domain}",
-                }
-            ],
-        }
+            record_key = (
+                name.replace(f".{zone_name}", "")
+                if name.endswith(f".{zone_name}")
+                else name
+            )
 
-        try:
+            data = {
+                "zoneName": zone_name,
+                "edits": [
+                    {
+                        "recordType": "TXT",
+                        "action": "ADD",
+                        "newKey": record_key,
+                        "newValue": value,
+                        "newTtl": ttl,
+                        "comments": f"ACME challenge for {domain}",
+                    }
+                ],
+            }
+
             response = self.session.post(f"{self.base_url}/zones/edits", json=data)
             response.raise_for_status()
             logger.debug(
                 f"Successfully added TXT record for {name} in zone {zone_name}"
             )
+            return response
+
+        try:
+            self._retry_on_zone_edits(_add_operation)
         except requests.exceptions.RequestException as e:
             raise errors.PluginError(f"Error adding TXT record: {e}")
 
@@ -80,35 +151,41 @@ class CSCClient:
         :param str value: The record value.
         :raises certbot.errors.PluginError: if an error occurs communicating with the CSC API
         """
-        zone_name = self._find_zone_for_domain(domain)
-        if not zone_name:
-            raise errors.PluginError(f"Unable to determine zone for domain {domain}")
 
-        # Extract the record key (remove zone from the full name)
-        record_key = (
-            name.replace(f".{zone_name}", "")
-            if name.endswith(f".{zone_name}")
-            else name
-        )
+        def _delete_operation():
+            zone_name = self._find_zone_for_domain(domain)
+            if not zone_name:
+                raise errors.PluginError(
+                    f"Unable to determine zone for domain {domain}"
+                )
 
-        data = {
-            "zoneName": zone_name,
-            "edits": [
-                {
-                    "recordType": "TXT",
-                    "action": "PURGE",
-                    "currentKey": record_key,
-                    "currentValue": value,
-                }
-            ],
-        }
+            record_key = (
+                name.replace(f".{zone_name}", "")
+                if name.endswith(f".{zone_name}")
+                else name
+            )
 
-        try:
+            data = {
+                "zoneName": zone_name,
+                "edits": [
+                    {
+                        "recordType": "TXT",
+                        "action": "PURGE",
+                        "currentKey": record_key,
+                        "currentValue": value,
+                    }
+                ],
+            }
+
             response = self.session.post(f"{self.base_url}/zones/edits", json=data)
             response.raise_for_status()
             logger.debug(
                 f"Successfully deleted TXT record for {name} in zone {zone_name}"
             )
+            return response
+
+        try:
+            self._retry_on_zone_edits(_delete_operation)
         except requests.exceptions.RequestException as e:
             raise errors.PluginError(f"Error deleting TXT record: {e}")
 

@@ -9,6 +9,7 @@ This plugin enables automatic SSL certificate generation and renewal for domains
 - **Automatic zone detection**: Automatically determines the correct DNS zone for your domain
 - **Secure credential handling**: Stores API credentials in a separate configuration file
 - **Configurable propagation delay**: Allows customization of DNS propagation wait time
+- **Zone edit conflict handling**: Automatically retries when CSC zone edits are in progress
 - **Full ACME challenge support**: Handles both certificate issuance and renewal
 - **Error handling**: Comprehensive error reporting and logging
 - **Testing support**: Includes comprehensive test suite
@@ -106,6 +107,48 @@ certbot certonly \
   --dns-csc-credentials /etc/letsencrypt/csc.ini \
   --dns-csc-propagation-seconds 60 \
   -d example.com
+```
+
+### Zone Edit Conflict Retry Mechanism
+
+With CSC API, it's not possible to add/delete records if the propagation is in progress for a domain. If you try to add/delete/edit the zone CSC API will return below example response:
+
+```sh
+HTTP/1.1 400
+Content-Type: application/json;charset=UTF-8
+Content-Length: 158
+Date: Fri, 06 Jun 2025 10:33:42 GMT
+Connection: close
+Server: Layer7-API-Gateway
+
+{"code":"OPEN_ZONE_EDITS","description":"Existing zone edits need to be resolved before publishing a new edit","value":"<zone_edit_uuid>"}
+```
+
+This plugin has avoid mechanism for this situation with below details:
+
+- **Default behavior**: Retries up to 10 times with exponential backoff
+- **Wait times**: Starts at 30 seconds, increases to maximum 5 minutes
+- **Total time**: May take up to 15 minutes in worst case scenarios
+
+This is normal when multiple certificate requests are made simultaneously. Because you won't be able to send another `POST` request during this time which means certbot will fail. This problem is resolved with this feature.
+
+Example logs:
+
+```sh
+2025-06-06 12:16:33,757:DEBUG:acme.client:Storing nonce: Fn04lWFjB-i-FEqtx7kghthfPiMe0vdndvOOr1G9uRh873svDFiwB0iasfafj5Y
+2025-06-06 12:16:33,758:INFO:certbot._internal.auth_handler:Performing the following challenges:
+2025-06-06 12:16:33,758:INFO:certbot._internal.auth_handler:dns-01 challenge for test.example.com
+2025-06-06 12:16:33,764:DEBUG:urllib3.connectionpool:Starting new HTTPS connection (1): apis.cscglobal.com:443
+2025-06-06 12:16:34,479:DEBUG:urllib3.connectionpool:https://apis.cscglobal.com:443 "GET /dbs/api/v2/zones HTTP/1.1" 200 2055
+2025-06-06 12:16:34,481:DEBUG:certbot_dns_csc.csc_client:Retrieved 1 zones from CSC API
+2025-06-06 12:16:34,787:DEBUG:urllib3.connectionpool:https://apis.cscglobal.com:443 "POST /dbs/api/v2/zones/edits HTTP/1.1" 400 160
+2025-06-06 12:16:34,789:INFO:certbot_dns_csc.csc_client:Zone edit in progress (attempt 1/11). Waiting 32 seconds before retry. Edit UUID: <edit_uuid>
+2025-06-06 12:17:06,797:DEBUG:urllib3.connectionpool:Resetting dropped connection: apis.cscglobal.com
+2025-06-06 12:17:07,233:DEBUG:urllib3.connectionpool:https://apis.cscglobal.com:443 "POST /dbs/api/v2/zones/edits HTTP/1.1" 400 160
+2025-06-06 12:17:07,235:INFO:certbot_dns_csc.csc_client:Zone edit in progress (attempt 2/11). Waiting 50 seconds before retry. Edit UUID: <edit_uuid>
+2025-06-06 12:20:49,366:DEBUG:urllib3.connectionpool:Resetting dropped connection: apis.cscglobal.com
+2025-06-06 12:20:49,991:DEBUG:urllib3.connectionpool:https://apis.cscglobal.com:443 "POST /dbs/api/v2/zones/edits HTTP/1.1" 201 193
+2025-06-06 12:20:49,992:DEBUG:certbot_dns_csc.csc_client:Successfully added TXT record for _acme-challenge.test.example.com in zone example.com
 ```
 
 ### Wildcard Certificates
@@ -323,6 +366,11 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 - **Community**: Join discussions in the project's GitHub Discussions
 
 ## Changelog
+
+### Version 1.0.1 - 2025-06-05
+- Automatic retry mechanism for CSC zone edit conflicts (OPEN_ZONE_EDITS)
+- Exponential backoff with jitter for retry attempts
+- Enhanced logging for retry operations
 
 ### Version 1.0.0
 - Initial release

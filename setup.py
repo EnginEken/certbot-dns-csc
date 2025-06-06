@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="certbot-dns-csc",
-    version="1.0.0",
+    version="1.0.1",
     author="Engin Eken",
     author_email="e.eken@outlook.com",
     description="CSC Global Domain Manager DNS Authenticator plugin for Certbot",
